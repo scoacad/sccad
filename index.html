@@ -20,7 +20,21 @@ const view=document.querySelector('#view'),msg=document.querySelector('#msg');
 const card=()=>state.cards[group];
 const save=()=>localStorage.setItem(key,JSON.stringify(state));
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const player=(c,i)=>'선수 '+String(c.id*4+i+1).padStart(2,'0');
+const player=(c,i)=>c.roster?.players[i]||'선수 '+String(c.id*4+i+1).padStart(2,'0');
+const rosterValid=r=>r&&Array.isArray(r.players)&&r.players.length===4&&[r.judge,...r.players].every(n=>typeof n==='string'&&n.trim()&&n.length<=60);
+const sameRoster=(a,b)=>a.judge===b.judge&&a.players.every((name,i)=>name===b.players[i]);
+const hasScores=c=>c.scores.some(p=>p.some(e=>e.shots!==null||e.penalty||e.reason));
+function assign(c,r){
+ if(!rosterValid(r)||state.locked||c.status!=='draft')throw Error('미제출 조에 심판과 선수 4명의 이름을 모두 입력해 주세요.');
+ if(state.cards.some(other=>other.id!==c.id&&other.roster?.judge===r.judge))throw Error('이 심판은 이미 다른 조에 배정되어 있습니다. 동명이인은 이름 뒤에 소속을 적어 주세요.');
+ if(c.roster&&!sameRoster(c.roster,r)&&hasScores(c)&&!confirm('이 조에 기록된 점수가 있습니다. 기존 타수를 유지하고 명단을 수정할까요?'))return false;
+ c.roster=r;return true;
+}
+function rosterPanel(c){
+ const off=state.locked||c.status!=='draft'?'disabled':'';
+ const field=(id,label,value)=>'<label>'+label+'<input id="'+id+'" maxlength="60" value="'+esc(value||'')+'" '+off+'></label>';
+ return '<section><h2>'+(c.id+1)+'조 선수·심판 배정</h2><div class="row">'+field('referee','담당 심판',c.roster?.judge)+c.scores.map((_,i)=>field('player-'+i,'선수 '+(i+1),c.roster?.players[i])).join('')+'</div><p class="row">'+btn('roster-save','조 편성 저장','class="primary" '+off)+(c.roster?btn('roster-export','심판용 조 편성 파일 저장'):'')+'</p></section>';
+}
 const total=p=>p.reduce((s,e)=>s+(e.shots??0)+e.penalty,0);
 const valid=e=>e&&Number.isInteger(e.shots)&&e.shots>=1&&e.shots<=99&&Number.isInteger(e.penalty)&&e.penalty>=0&&e.penalty<=99&&typeof e.reason==='string'&&e.reason.length<=120&&(!e.penalty||e.reason.trim());
 const editable=c=>!state.locked&&['draft','returned'].includes(c.status);
@@ -29,14 +43,14 @@ const select=()=>'<label>조 선택<select id="group">'+state.cards.map(c=>'<opt
 const file=(id,label)=>'<label>'+label+'<input id="'+id+'" type="file" accept=".json,application/json" '+(state.locked?'disabled':'')+'></label>';
 function judge(c){
  const off=editable(c)?'':'disabled';
- return '<section>'+select()+'<p>이 브라우저에 자동 저장됩니다.</p>'+(c.note?'<p>본부 요청 · '+esc(c.note)+'</p>':'')+'<div class="row">'+c.scores[0].map((_,h)=>'<button data-hole="'+h+'" class="'+(h===hole?'active':c.scores.every(p=>valid(p[h]))?'done':'')+'">'+(h+1)+'</button>').join('')+'</div></section><section><h2>'+(hole+1)+'번 홀</h2>'+c.scores.map((p,i)=>{
+ return '<section>'+select()+'<p>담당 심판 · '+esc(c.roster?.judge||'미배정')+'</p><p>이 브라우저에 자동 저장됩니다.</p>'+(c.note?'<p>본부 요청 · '+esc(c.note)+'</p>':'')+'<div class="row">'+c.scores[0].map((_,h)=>'<button data-hole="'+h+'" class="'+(h===hole?'active':c.scores.every(p=>valid(p[h]))?'done':'')+'">'+(h+1)+'</button>').join('')+'</div></section><section><h2>'+(hole+1)+'번 홀</h2>'+c.scores.map((p,i)=>{
  const e=p[hole],input=(field,label,attrs)=>'<label>'+label+'<input '+attrs+' data-player="'+i+'" data-field="'+field+'" value="'+esc(e[field]??'')+'" '+off+'></label>';
- return '<div class="player"><strong>'+player(c,i)+'</strong>'+input('shots','타수','type="number" min="1" max="99" inputmode="numeric"')+input('penalty','벌타','type="number" min="0" max="99" inputmode="numeric"')+'<span class="sum">'+total(p)+'타</span><div class="reason">'+input('reason','벌타 사유','maxlength="120"')+'</div></div>';
- }).join('')+'<p>선수 옆 숫자는 누적 타수입니다.</p><div class="row">'+btn('next','다음 홀',hole===17?'disabled':'')+btn('submit','카드 제출','class="primary" '+off)+btn('sample','예시 점수 채우기',off)+(c.status==='sent'?btn('export','제출 카드 파일 저장'):'')+'</div></section><section>'+file('return-file','본부 수정 요청 파일 열기')+'</section>';
+ return '<div class="player"><strong>'+esc(player(c,i))+'</strong>'+input('shots','타수','type="number" min="1" max="99" inputmode="numeric"')+input('penalty','벌타','type="number" min="0" max="99" inputmode="numeric"')+'<span class="sum">'+total(p)+'타</span><div class="reason">'+input('reason','벌타 사유','maxlength="120"')+'</div></div>';
+ }).join('')+'<p>선수 옆 숫자는 누적 타수입니다.</p><div class="row">'+btn('next','다음 홀',hole===17?'disabled':'')+btn('submit','카드 제출','class="primary" '+off)+btn('sample','예시 점수 채우기',off)+(c.status==='sent'?btn('export','제출 카드 파일 저장'):'')+'</div></section><section>'+file('roster-file','담당 조 편성 파일 열기')+'<p></p>'+file('return-file','본부 수정 요청 파일 열기')+'</section>';
 }
 const table=(headers,rows)=>'<div class="scroll"><table><thead><tr>'+headers.map(h=>'<th>'+h+'</th>').join('')+'</tr></thead><tbody>'+rows.map(row=>'<tr>'+row.map(v=>'<td>'+v+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';
 function desk(c){
- return '<section><h2>조별 제출 현황</h2><div class="row">'+Object.entries(labels).map(([k,l])=>'<span class="metric">'+l+' <b>'+state.cards.filter(c=>c.status===k).length+'</b></span>').join('')+'</div><p>다른 기기에서 제출한 카드는 파일로 가져오세요.</p>'+file('card-file','제출 카드 가져오기')+'</section><section>'+select()+'<p>제출 차수 '+c.rev+'</p>'+table(['선수',...c.scores[0].map((_,h)=>(h+1)+'홀'),'합계'],c.scores.map((p,i)=>[player(c,i),...p.map(e=>(e.shots??'—')+(e.penalty?' + '+e.penalty+'<br><small>'+esc(e.reason)+'</small>':'')),total(p)]))+(c.status==='sent'?'<p><label>수정 요청 사유<input id="note" maxlength="120"></label></p><div class="row">'+btn('approve','승인','class="primary"')+btn('return','수정 요청')+'</div>':'')+(c.status==='returned'?'<p>'+esc(c.note)+'</p>'+btn('export-return','수정 요청 파일 저장'):'')+'</section>';
+ return '<section><h2>조별 제출 현황</h2><div class="row">'+Object.entries(labels).map(([k,l])=>'<span class="metric">'+l+' <b>'+state.cards.filter(c=>c.status===k).length+'</b></span>').join('')+'</div><p>다른 기기에서 제출한 카드는 파일로 가져오세요.</p>'+file('card-file','제출 카드 가져오기')+'</section><section>'+select()+'</section>'+rosterPanel(c)+'<section><p>제출 차수 '+c.rev+'</p>'+table(['선수',...c.scores[0].map((_,h)=>(h+1)+'홀'),'합계'],c.scores.map((p,i)=>[esc(player(c,i)),...p.map(e=>(e.shots??'—')+(e.penalty?' + '+e.penalty+'<br><small>'+esc(e.reason)+'</small>':'')),total(p)]))+(c.status==='sent'?'<p><label>수정 요청 사유<input id="note" maxlength="120"></label></p><div class="row">'+btn('approve','승인','class="primary"')+btn('return','수정 요청')+'</div>':'')+(c.status==='returned'?'<p>'+esc(c.note)+'</p>'+btn('export-return','수정 요청 파일 저장'):'')+'</section>';
 }
 function rankings(){
  const rows=state.cards.filter(c=>c.status==='ok').flatMap(c=>c.scores.map((p,i)=>({name:player(c,i),group:c.id+1,total:total(p),penalty:p.reduce((s,e)=>s+e.penalty,0)}))).sort((a,b)=>a.total-b.total);
@@ -45,7 +59,7 @@ function rankings(){
 }
 function rank(){
  const rows=rankings();
- return '<section><h2>'+(state.locked?'최종':'잠정')+' 순위</h2><p>승인 선수 '+rows.length+'명 · 총타수가 낮은 순 · 동타 공동 순위</p>'+table(['순위','선수','조','총타수','벌타'],rows)+'<p class="row">'+btn('csv','엑셀용 CSV 저장',rows.length?'':'disabled')+btn('lock','최종 순위 확정','class="primary" '+(state.locked||state.cards.some(c=>c.status!=='ok')?'disabled':''))+'</p></section>';
+ return '<section><h2>'+(state.locked?'최종':'잠정')+' 순위</h2><p>승인 선수 '+rows.length+'명 · 총타수가 낮은 순 · 동타 공동 순위</p>'+table(['순위','선수','조','총타수','벌타'],rows.map(([n,name,...rest])=>[n,esc(name),...rest]))+'<p class="row">'+btn('csv','엑셀용 CSV 저장',rows.length?'':'disabled')+btn('lock','최종 순위 확정','class="primary" '+(state.locked||state.cards.some(c=>c.status!=='ok')?'disabled':''))+'</p></section>';
 }
 function render(){
  document.querySelectorAll('[data-tab]').forEach(b=>{b.classList.toggle('active',b.dataset.tab===tab);b.setAttribute('aria-pressed',String(b.dataset.tab===tab));});
@@ -55,7 +69,18 @@ function download(filename,value,type='application/json'){
  const url=URL.createObjectURL(new Blob([value],{type}));
  const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
+function csvCell(value){
+ const str=String(value);
+ const safe=/^[\s]*[=+@-]|^[\t\r\n]/.test(str)?"'"+str:str;
+ return '"'+safe.replaceAll('"','""')+'"';
+}
 function action(a,c){
+ if(a==='roster-save'&&tab==='desk'){
+  const read=id=>document.getElementById(id).value.trim();
+  return assign(c,{judge:read('referee'),players:c.scores.map((_,i)=>read('player-'+i))})?'조 편성을 저장했습니다.':'';
+ }
+ if(a==='roster-export'&&c.roster)download('group-'+(c.id+1)+'.json',JSON.stringify({kind:'roster',id:c.id,roster:c.roster}));
+
  if(a==='next')hole=Math.min(17,hole+1);
  if(a==='sample'&&editable(c)){
   if(c.scores.some(p=>p.some(e=>e.shots!==null||e.penalty||e.reason))&&!confirm('현재 점수를 예시 점수로 바꿀까요?'))return;
@@ -75,26 +100,33 @@ function action(a,c){
  if(a==='export'&&c.status==='sent')download('card-'+(c.id+1)+'-'+c.rev+'.json',JSON.stringify({kind:'card',...c}));
  if(a==='export-return'&&c.status==='returned')download('return-'+(c.id+1)+'-'+c.rev+'.json',JSON.stringify({kind:'return',id:c.id,rev:c.rev,note:c.note}));
  if(a==='lock'&&state.cards.every(c=>c.status==='ok')&&!state.locked&&confirm('최종 순위를 확정할까요?')){state.locked=true;return '최종 순위를 확정했습니다.';}
- if(a==='csv')download('park-golf-results.csv','\ufeff순위,선수,조,총타수,벌타\r\n'+rankings().map(r=>r.join(',')).join('\r\n'),'text/csv;charset=utf-8');
+ if(a==='csv')download('park-golf-results.csv','\ufeff순위,선수,조,총타수,벌타\r\n'+rankings().map(r=>r.map(csvCell).join(',')).join('\r\n'),'text/csv;charset=utf-8');
 }
 function importFile(d,kind){
- if(state.locked||!d||d.kind!==kind||!Number.isInteger(d.id)||!Number.isInteger(d.rev)||d.rev<1)throw Error();
+ if(state.locked||!d||d.kind!==kind||!Number.isInteger(d.id))throw Error();
  const c=state.cards[d.id];if(!c)throw Error();
+ if(kind==='roster'){
+  if(!assign(c,d.roster))return false;
+  group=c.id;hole=0;tab='judge';return true;
+ }
+ if(!Number.isInteger(d.rev)||d.rev<1)throw Error();
  if(kind==='return'){
   if(c.status!=='sent'||d.rev!==c.rev||typeof d.note!=='string'||!d.note.trim()||d.note.length>120)throw Error();
   Object.assign(c,{status:'returned',note:d.note});
  }else{
   if(!editable(c)||d.rev<=c.rev||!Array.isArray(d.scores)||d.scores.length!==4||!d.scores.every(p=>Array.isArray(p)&&p.length===18&&p.every(valid)))throw Error();
+  if(d.roster!==undefined&&(!rosterValid(d.roster)||(c.roster&&!sameRoster(c.roster,d.roster))))throw Error('제출 카드의 선수·심판 명단이 본부 조 편성과 다릅니다.');
+  if(!c.roster&&d.roster&&!assign(c,d.roster))return false;
   Object.assign(c,{status:'sent',rev:d.rev,scores:d.scores,note:''});
  }
- group=c.id;hole=0;
+ group=c.id;hole=0;return true;
 }
 document.addEventListener('click',e=>{
  const b=e.target.closest('button');if(!b)return;
  state=load();
  if(b.dataset.tab){tab=b.dataset.tab;msg.textContent='';}
  if(b.dataset.hole!==undefined)hole=Number(b.dataset.hole);
- if(b.dataset.action){msg.textContent=action(b.dataset.action,card())||'';save();}
+ if(b.dataset.action){try{msg.textContent=action(b.dataset.action,card())||'';save();}catch(error){msg.textContent=error.message;return;}}
  render();
 });
 view.addEventListener('input',e=>{
@@ -107,8 +139,8 @@ view.addEventListener('input',e=>{
 view.addEventListener('change',async e=>{
  if(e.target.id==='group'){group=Number(e.target.value);hole=0;render();return;}
  if(!e.target.files?.length)return;
- try{const d=JSON.parse(await e.target.files[0].text());state=load();importFile(d,e.target.id==='card-file'?'card':'return');save();msg.textContent='파일을 반영했습니다.';}
- catch{msg.textContent='파일을 반영할 수 없습니다. 파일 종류, 제출 차수, 현재 상태를 확인해 주세요.';}
+ try{const d=JSON.parse(await e.target.files[0].text());state=load();const kinds={'card-file':'card','return-file':'return','roster-file':'roster'};if(importFile(d,kinds[e.target.id])){save();msg.textContent='파일을 반영했습니다.';}}
+ catch(error){msg.textContent=error.message||'파일을 반영할 수 없습니다. 파일 종류, 제출 차수, 현재 상태를 확인해 주세요.';}
  render();
 });
 window.addEventListener('storage',e=>{if(e.key===key){state=load();render();}});
